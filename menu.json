@@ -1,0 +1,49 @@
+{
+  "modifier_groups": {
+    "size": {
+      "label": "Size", "required": true, "multi": false, "default": "m",
+      "options": [
+        {"id": "s", "name": "Small 8oz", "price": 0},
+        {"id": "m", "name": "Medium 12oz", "price": 50},
+        {"id": "l", "name": "Large 16oz", "price": 100}
+      ]
+    },
+    "milk": {
+      "label": "Milk", "required": false, "multi": false, "default": "whole",
+      "options": [
+        {"id": "whole", "name": "Whole milk", "price": 0},
+        {"id": "skim", "name": "Skim milk", "price": 0},
+        {"id": "oat", "name": "Oat milk", "price": 75},
+        {"id": "almond", "name": "Almond milk", "price": 75}
+      ]
+    },
+    "extras": {
+      "label": "Extras", "required": false, "multi": true,
+      "options": [
+        {"id": "shot", "name": "Extra shot", "price": 75},
+        {"id": "vanilla", "name": "Vanilla syrup", "price": 60},
+        {"id": "caramel", "name": "Caramel syrup", "price": 60},
+        {"id": "decaf", "name": "Make it decaf", "price": 0}
+      ]
+    }
+  },
+  "items": [
+    {"id": "drip", "name": "Drip Coffee", "category": "drink", "price": 275, "description": "Fresh-brewed house roast.", "groups": ["size", "extras"]},
+    {"id": "americano", "name": "Americano", "category": "drink", "price": 350, "description": "Espresso topped with hot water.", "groups": ["size", "extras"]},
+    {"id": "latte", "name": "Latte", "category": "drink", "price": 475, "description": "Espresso and steamed milk.", "groups": ["size", "milk", "extras"]},
+    {"id": "cappuccino", "name": "Cappuccino", "category": "drink", "price": 450, "description": "Equal parts espresso, steamed milk and foam.", "groups": ["size", "milk", "extras"]},
+    {"id": "flatwhite", "name": "Flat White", "category": "drink", "price": 475, "description": "Velvety microfoam over a double shot.", "groups": ["size", "milk", "extras"]},
+    {"id": "mocha", "name": "Mocha", "category": "drink", "price": 525, "description": "Espresso, chocolate and steamed milk.", "groups": ["size", "milk", "extras"]},
+    {"id": "coldbrew", "name": "Cold Brew", "category": "drink", "price": 425, "description": "Steeped 18 hours, served over ice.", "groups": ["size", "extras"]},
+    {"id": "icedlatte", "name": "Iced Latte", "category": "drink", "price": 500, "description": "Espresso and cold milk over ice.", "groups": ["size", "milk", "extras"]},
+    {"id": "chai", "name": "Chai Latte", "category": "drink", "price": 495, "description": "Spiced black tea with steamed milk.", "groups": ["size", "milk"]},
+    {"id": "hotchoc", "name": "Hot Chocolate", "category": "drink", "price": 395, "description": "Rich and creamy, no coffee.", "groups": ["size", "milk"]},
+
+    {"id": "croissant", "name": "Butter Croissant", "category": "pastry", "price": 350, "description": "Flaky, baked fresh each morning.", "groups": []},
+    {"id": "muffin", "name": "Blueberry Muffin", "category": "pastry", "price": 325, "description": "Loaded with blueberries.", "groups": []},
+    {"id": "cinroll", "name": "Cinnamon Roll", "category": "pastry", "price": 425, "description": "Warm with cream cheese icing.", "groups": []},
+    {"id": "banana", "name": "Banana Bread", "category": "pastry", "price": 350, "description": "A thick slice, lightly toasted.", "groups": []},
+
+    {"id": "beans", "name": "House Blend Beans (12oz)", "category": "beans", "price": 1400, "description": "Our signature medium roast, whole bean.", "groups": []}
+  ]
+}

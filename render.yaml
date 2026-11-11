@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: steves-coffee-pilot
+    runtime: python
+    plan: 0.5c-512mb
+    numInstances: 1
+    buildCommand: python3 -m compileall -q server.py clover.py
+    startCommand: python3 -u server.py
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /data/steves.db
+      - key: TZ
+        value: America/Los_Angeles
+      - key: PILOT_CODE
+        generateValue: true
+      - key: STAFF_PIN
+        generateValue: true
+      - key: STORE_OPEN
+        value: "06:30"
+      - key: STORE_CLOSE
+        value: "18:00"

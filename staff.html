@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Steve's Coffee: Staff</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+main{max-width:1100px}
+.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start}
+.col h2{margin:0 0 8px;display:flex;justify-content:space-between}
+.ticket{background:#fff;border:1px solid var(--line);border-left:6px solid var(--accent);border-radius:12px;padding:12px;margin-bottom:10px}
+.ticket.ready{border-left-color:var(--ok)}.ticket.here{border-left-color:var(--bad);background:#fff4f2}
+.ticket .t{font-weight:800;font-size:1.1rem}
+.ticket ul{margin:8px 0;padding-left:18px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.tag{display:inline-block;font-size:.72rem;font-weight:700;background:var(--line);padding:2px 7px;border-radius:99px;margin-right:4px}
+.tag.red{background:#fbe9e7;color:var(--bad)}.tag.gold{background:#fff4d6;color:#6a4b00}
+</style>
+</head>
+<body>
+<header><span class="logo">☕ Steve's Coffee · Staff</span><span id="ctl"></span></header>
+<main id="app"></main>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+const money = c => '$' + (c / 100).toFixed(2);
+let pin = sessionStorage.getItem('pin') || '', seen = null, timer;
+
+async function api(path, body) {
+  const o = { headers: { 'X-Staff-Pin': pin } };
+  if (body !== undefined) {
+    o.method = 'POST';
+    o.headers['Content-Type'] = 'application/json';
+    o.body = JSON.stringify(body);
+  }
+  const r = await fetch('/api' + path, o);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(d.error || 'Error'); e.status = r.status; throw e; }
+  return d;
+}
+
+function login(msg) {
+  clearTimeout(timer);
+  $('#ctl').innerHTML = '';
+  $('#app').innerHTML = `<div class="card" style="max-width:320px;margin:40px auto"><h1>Staff sign-in</h1>
+    ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
+    <label for="p">Staff code</label><input id="p" type="password" autocomplete="current-password" autofocus>
+    <button class="btn block" id="go" style="margin-top:12px">Open order screen</button></div>`;
+  const go = () => { pin = $('#p').value; sessionStorage.setItem('pin', pin); load(); };
+  $('#go').onclick = go; $('#p').onkeydown = e => e.key === 'Enter' && go();
+}
+
+function beep() {
+  try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + .25); } catch { }
+}
+
+async function load() {
+  clearTimeout(timer);
+  let d;
+  try { d = await api('/staff/orders'); }
+  catch (e) { return e.status === 401 ? login(pin ? 'Check your staff code and try again.' : '') : $('#app').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  const ids = new Set(d.orders.map(o => o.id));
+  if (seen && [...ids].some(i => !seen.has(i))) beep();
+  seen = ids;
+  const by = s => d.orders.filter(o => o.status === s);
+  const ticket = o => `<div class="ticket ${o.status === 'ready' ? 'ready' : ''} ${o.arrived ? 'here' : ''}">
+    <div class="row"><span class="t">${esc(o.name)}</span><span class="t">${esc(o.pickup_label)}</span></div>
+    <div class="small muted">#${esc(o.id.slice(-6))}${o.phone_last4 ? ' · ···' + esc(o.phone_last4) : ' · guest'}</div>
+    <div style="margin-top:4px">${o.pickup_type === 'curbside' ? `<span class="tag red">CURBSIDE: ${esc(o.vehicle)}</span>` : ''}${o.arrived ? '<span class="tag red">📍 HERE NOW</span>' : ''}${o.reward_id ? `<span class="tag gold">REWARD: ${esc(o.reward_id)}</span>` : ''}${o.clover_id === 'SYNC_FAILED' ? '<span class="tag red">NOT IN CLOVER</span>' : ''}</div>
+    <ul>${o.lines.map(l => `<li><b>${l.qty}× ${esc(l.name)}</b>${l.desc.length ? `<div class="small muted">${esc(l.desc.join(', '))}</div>` : ''}</li>`).join('')}</ul>
+    <div class="row"><div class="acts">${({
+      received: `<button class="btn sm" data-s="preparing" data-id="${o.id}">Start</button>`,
+      preparing: `<button class="btn sm" data-s="ready" data-id="${o.id}">Ready</button>`,
+      ready: `<button class="btn sm" data-s="picked_up" data-id="${o.id}">Picked up</button>`
+    })[o.status] || ''}${['received', 'preparing', 'ready'].includes(o.status) ? `<button class="btn ghost sm" data-s="cancelled" data-id="${o.id}">Cancel</button>` : ''}</div>
+    <span class="small muted">${money(o.total_cents)}</span></div></div>`;
+  const col = (t, s) => `<div class="col"><h2>${t} <span class="badge" style="background:var(--line)">${by(s).length}</span></h2>${by(s).map(ticket).join('') || '<div class="muted small">Nothing here</div>'}</div>`;
+  $('#ctl').innerHTML = `<button class="btn sm" id="pause" style="background:${d.paused ? 'var(--bad)' : 'var(--ok)'}">${d.paused ? '⏸ Online orders PAUSED, tap to resume' : '● Online orders ON, tap to pause'}</button> <button class="btn sm" id="out">Sign out</button>`;
+  $('#out').onclick = () => { pin = ''; sessionStorage.removeItem('pin'); seen = null; login(); };
+  $('#pause').onclick = async () => { await api('/staff/pause', { paused: !d.paused }); load(); };
+  $('#app').innerHTML = `<div class="cols">${col('New', 'received')}${col('Making', 'preparing')}${col('Ready', 'ready')}</div>
+    <h2 style="margin-top:24px">Recently finished</h2>
+    <div class="small muted">${d.orders.filter(o => ['picked_up', 'cancelled'].includes(o.status)).map(o => `#${esc(o.id.slice(-6))} ${esc(o.name)} (${o.status.replace('_', ' ')})`).join(' · ') || 'None'}</div>`;
+  document.querySelectorAll('[data-s]').forEach(b => b.onclick = async () => {
+    if (b.dataset.s === 'cancelled' && !confirm('Cancel this order?')) return;
+    try { await api(`/staff/orders/${b.dataset.id}/status`, { status: b.dataset.s }); } catch (e) { alert(e.message); }
+    load();
+  });
+  timer = setTimeout(load, 5000);
+}
+pin ? load() : login();
+</script>
+</body>
+</html>
