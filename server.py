@@ -22,7 +22,9 @@ import clover
 
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
-DB_PATH = os.environ.get("DB_PATH", str(BASE / "steves.db"))
+TEMPORARY_DB = os.environ.get("TEMPORARY_DB") == "1"
+DEFAULT_DB_PATH = "/tmp/steves.db" if TEMPORARY_DB else str(BASE / "steves.db")
+DB_PATH = os.environ.get("DB_PATH", DEFAULT_DB_PATH)
 
 CFG = {
     "shop_name": os.environ.get("SHOP_NAME", "Steve's Coffee"),
@@ -650,9 +652,15 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if ON_RENDER and (
         len(PILOT_CODE) < 16 or len(STAFF_PIN) < 16 or STAFF_PIN == PILOT_CODE
-        or CLOVER.name != "mock" or not Path(DB_PATH).is_relative_to("/data")
+        or CLOVER.name != "mock"
     ):
-        raise SystemExit("Render pilot requires separate strong access and staff codes, simulated Clover, and a database on /data.")
+        raise SystemExit("Render pilot requires separate strong access and staff codes and simulated Clover.")
+    if ON_RENDER:
+        db_root = "/tmp" if TEMPORARY_DB else "/data"
+        if not Path(DB_PATH).resolve().is_relative_to(db_root):
+            raise SystemExit(f"Set DB_PATH to a SQLite file under {db_root}.")
+        if TEMPORARY_DB:
+            print("Temporary pilot storage is enabled. Test data may reset when Render stops or redeploys.")
     init_db()
     port = int(os.environ.get("PORT", "8000"))
     print(f"{CFG['shop_name']} running on http://localhost:{port}  (POS: {CLOVER.name})")
