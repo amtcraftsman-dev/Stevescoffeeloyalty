@@ -78,15 +78,23 @@ async function viewMenu() {
   }
   const me = S.me;
   const promo = me
-    ? `<div class="hero"><b>Hi ${esc(me.name)}!</b> You have <b>${me.points} points</b>. <a href="#/rewards">See rewards →</a></div>`
-    : `<div class="hero"><b>Earn a free drink.</b> Join rewards and get ${S.config.welcome_bonus} bonus points. <a href="#/rewards">Sign up →</a></div>`;
+    ? `<p>Hi ${esc(me.name)}. You have <b>${me.points} points</b>.</p>`
+    : `<p>Join Steve’s Rewards and get <b>${S.config.welcome_bonus} bonus points</b>.</p>`;
+  const welcome = `<section class="menu-hero">
+    <div class="menu-hero-copy">
+      <h1>Order ahead.</h1>
+      ${promo}
+      <a class="btn" href="#/rewards">${me ? 'See rewards' : 'Join rewards'}</a>
+    </div>
+  </section>`;
   const cats = [['drink', 'Drinks'], ['pastry', 'Pastries'], ['beans', 'Beans']];
-  view(`${active}${banner}${promo}
-    <div class="tabs">${cats.map(([k, n]) => `<button class="tab ${S.cat === k ? 'on' : ''}" data-cat="${k}">${n}</button>`).join('')}</div>
+  view(`${active}${banner}${welcome}
+    <div class="menu-heading"><h2>Pickup menu</h2>
+    <div class="tabs" aria-label="Menu categories">${cats.map(([k, n]) => `<button class="tab ${S.cat === k ? 'on' : ''}" data-cat="${k}" aria-pressed="${S.cat === k}">${n}</button>`).join('')}</div></div>
     <div class="grid">${S.menu.items.filter(i => i.category === S.cat).map(i => `
       <button class="item" data-id="${i.id}">
         <span><b>${esc(i.name)}</b><small>${esc(i.description)}</small></span>
-        <span class="price">${money(i.price)}</span>
+        <span class="item-action"><span class="price">${money(i.price)}</span><span aria-hidden="true">↗</span></span>
       </button>`).join('')}</div>
     ${cartCount() ? `<div class="bar"><a class="btn block" href="#/cart"><span>View cart (${cartCount()})</span><span>${money(S.cart.reduce((n, l) => n + l.unit * l.qty, 0))}</span></a></div>` : ''}`);
   document.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.cat = b.dataset.cat; viewMenu(); });
@@ -104,8 +112,8 @@ function openItem(id) {
   const draw = () => {
     const line = { id, mods: sel };
     const unit = lineUnit(line);
-    $('#overlay').innerHTML = `<div class="modal-bg"><div class="modal">
-      <div class="row"><h1 style="margin:0">${esc(item.name)}</h1><button class="tab" id="x">✕</button></div>
+    $('#overlay').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="item-title">
+      <div class="row"><h1 id="item-title" style="margin:0">${esc(item.name)}</h1><button class="tab" id="x" aria-label="Close item">✕</button></div>
       <p class="muted">${esc(item.description)}</p>
       ${item.groups.map(gid => {
       const g = S.menu.modifier_groups[gid];
@@ -236,13 +244,13 @@ async function viewOrder(id) {
       ${o.status === 'cancelled' ? `<div class="err">This order was cancelled.</div>` : `
       <div class="steps">${[['received', 'Received'], ['preparing', 'Making'], ['ready', 'Ready'], ['picked_up', 'Picked up']].map(([k, n], i) =>
       `<div class="step ${i <= idx ? 'done' : ''}"><i></i>${n}</div>`).join('')}</div>
-      ${o.status === 'ready' ? `<div class="hero"><b>Your order is ready! 🎉</b><br>${o.pickup_type === 'curbside' ? 'Tap the button below and we\'ll bring it out.' : 'Come on in and grab it at the counter.'}</div>` : ''}
+      ${o.status === 'ready' ? `<div class="hero"><b>Your order is ready!</b><br>${o.pickup_type === 'curbside' ? 'Tap the button below and we\'ll bring it out.' : 'Come on in and grab it at the counter.'}</div>` : ''}
       ${o.pickup_type === 'curbside' && ['received', 'preparing', 'ready'].includes(o.status) ? (o.arrived ? '<div class="notice">We know you\'re here. Hang tight!</div>' : '<button class="btn block" id="here">I\'m here</button>') : ''}`}
       <h2>Items</h2><div class="card">${o.lines.map(l => `<div class="row"><span>${l.qty}× ${esc(l.name)}<div class="muted small">${esc(l.desc.join(' · '))}</div></span></div>`).join('<hr style="border:0;border-top:1px solid var(--line)">')}
       <hr style="border:0;border-top:1px solid var(--line)">
       ${o.discount_cents ? `<div class="row good"><span>Reward</span><span>−${money(o.discount_cents)}</span></div>` : ''}
       <div class="row"><b>Total (plus tax)</b><b>${money(o.total_cents)}</b></div></div>
-      ${o.status === 'picked_up' && o.points_awarded ? `<div class="notice">You earned <b>${o.points_awarded} points</b> on this order. ☕</div>` : ''}
+      ${o.status === 'picked_up' && o.points_awarded ? `<div class="notice">You earned <b>${o.points_awarded} points</b> on this order.</div>` : ''}
       ${!o.has_account && o.status !== 'cancelled' ? `<p class="muted small">Join <a href="#/rewards">rewards</a> next time to earn points on every order.</p>` : ''}
       <a class="btn ghost block" href="#/">Back to menu</a>`);
     $('#here')?.addEventListener('click', async () => {
@@ -268,8 +276,8 @@ async function viewRewards() {
   const me = d.customer, rw = S.config.rewards;
   const next = rw.find(r => r.cost > me.points);
   const pct = next ? Math.min(100, (me.points / next.cost) * 100) : 100;
-  view(`<h1>Hi ${esc(me.name)} 👋</h1>
-    <div class="card"><div class="points">${me.points}</div><div class="muted">points</div>
+  view(`<h1>Hi ${esc(me.name)}</h1>
+    <div class="card balance-card"><div class="points">${me.points}</div><div class="muted">points</div>
       <div class="meter"><div style="width:${pct}%"></div></div>
       <div class="small muted">${next ? `${next.cost - me.points} more points to unlock a <b>${esc(next.name.toLowerCase())}</b>` : 'You can redeem any reward!'}</div></div>
     <div class="card"><h2 style="margin-top:0">Rewards</h2>

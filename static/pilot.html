@@ -3,22 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#6b3f23">
+<meta name="theme-color" content="#fbfaf7">
 <title>Steve's Coffee | Pilot</title>
 <link rel="manifest" href="/app.webmanifest">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header><span class="logo">☕ Steve's Coffee</span></header>
-<main>
-  <form method="post" class="card" style="max-width:420px;margin:36px auto">
-    <h1>Steve's Coffee pilot</h1>
+<header><div class="header-inner">
+  <a class="logo" href="https://www.stevescoffee.com/"><img src="/steves-logo.png" width="60" height="48" alt="">Steve’s Coffee</a>
+</div></header>
+<main class="pilot-page">
+  <div class="pilot-photo" aria-hidden="true"></div>
+  <form method="post" class="card pilot-form">
+    <h1>Order ahead &amp; rewards</h1>
     <p>Enter the access code provided by the shop. Use sample names and phone numbers for test orders.</p>
     <!-- error -->
     <label for="code">Pilot access code</label>
     <input id="code" name="code" type="password" autocomplete="current-password" required>
-    <button class="btn block" style="margin-top:14px">Open pilot</button>
+    <button class="btn block" style="margin-top:18px">Open pilot</button>
   </form>
 </main>
 </body>

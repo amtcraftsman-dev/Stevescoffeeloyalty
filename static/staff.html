@@ -7,11 +7,11 @@
 <link rel="stylesheet" href="/style.css">
 <style>
 main{max-width:1100px}
-.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start}
+.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(260px, 100%),1fr));align-items:start}
 .col h2{margin:0 0 8px;display:flex;justify-content:space-between}
-.ticket{background:#fff;border:1px solid var(--line);border-left:6px solid var(--accent);border-radius:12px;padding:12px;margin-bottom:10px}
+.ticket{background:#fff;border:1px solid var(--line);border-left:6px solid var(--accent);padding:16px;margin-bottom:10px}
 .ticket.ready{border-left-color:var(--ok)}.ticket.here{border-left-color:var(--bad);background:#fff4f2}
-.ticket .t{font-weight:800;font-size:1.1rem}
+.ticket .t{font:1.2rem Georgia,serif}
 .ticket ul{margin:8px 0;padding-left:18px}
 .acts{display:flex;gap:6px;flex-wrap:wrap}
 .tag{display:inline-block;font-size:.72rem;font-weight:700;background:var(--line);padding:2px 7px;border-radius:99px;margin-right:4px}
@@ -19,7 +19,10 @@ main{max-width:1100px}
 </style>
 </head>
 <body>
-<header><span class="logo">☕ Steve's Coffee · Staff</span><span id="ctl"></span></header>
+<header><div class="header-inner staff-header">
+  <span class="logo"><img src="/steves-logo.png" width="60" height="48" alt="">Steve’s Coffee <span class="staff-label">Staff</span></span>
+  <span id="ctl"></span>
+</div></header>
 <main id="app"></main>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
@@ -43,7 +46,7 @@ async function api(path, body) {
 function login(msg) {
   clearTimeout(timer);
   $('#ctl').innerHTML = '';
-  $('#app').innerHTML = `<div class="card" style="max-width:320px;margin:40px auto"><h1>Staff sign-in</h1>
+  $('#app').innerHTML = `<div class="card" style="max-width:440px;margin:40px auto"><h1>Staff sign-in</h1>
     ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
     <label for="p">Staff code</label><input id="p" type="password" autocomplete="current-password" autofocus>
     <button class="btn block" id="go" style="margin-top:12px">Open order screen</button></div>`;
