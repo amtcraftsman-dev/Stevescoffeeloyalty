@@ -35,6 +35,7 @@ CFG = {
     "slot_capacity": int(os.environ.get("SLOT_CAPACITY", "5")),
     "curbside_enabled": os.environ.get("CURBSIDE_ENABLED", "0") == "1",
     "always_open": os.environ.get("ALWAYS_OPEN", "0") == "1",  # demo/testing only
+    "ordering_enabled": os.environ.get("ORDERING_ENABLED") == "1",
     "points_per_dollar": 1,
     "welcome_bonus": 10,
 }
@@ -92,6 +93,9 @@ def init_db():
             reward_cost INTEGER DEFAULT 0, pickup_time TEXT, pickup_type TEXT,
             vehicle TEXT, arrived INTEGER DEFAULT 0, status TEXT,
             points_awarded INTEGER DEFAULT 0, clover_id TEXT, created TEXT);
+        CREATE TABLE IF NOT EXISTS receipt_credits(
+            receipt TEXT PRIMARY KEY, phone TEXT NOT NULL,
+            subtotal_cents INTEGER NOT NULL, points INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
         """)
 
@@ -176,6 +180,8 @@ def parse_hm(s, day):
 
 
 def compute_slots(con):
+    if not CFG["ordering_enabled"]:
+        return {"open": False, "paused": True, "reason": "Online ordering is on hold.", "slots": []}
     now = datetime.now()
     open_t, close_t = parse_hm(CFG["open"], now), parse_hm(CFG["close"], now)
     if CFG["always_open"]:
@@ -294,6 +300,7 @@ def h_config(ctx):
         s = compute_slots(con)
     return {"shop_name": CFG["shop_name"], "curbside_enabled": CFG["curbside_enabled"],
             "rewards": REWARDS, "welcome_bonus": CFG["welcome_bonus"],
+            "ordering_enabled": CFG["ordering_enabled"], "points_per_dollar": CFG["points_per_dollar"],
             "ordering": {k: s[k] for k in ("open", "paused", "reason")},
             "clover": CLOVER.name}
 
@@ -368,6 +375,8 @@ def h_me(ctx):
 
 
 def h_quote(ctx):
+    if not CFG["ordering_enabled"]:
+        raise ApiError(409, "Online ordering is on hold.")
     b = ctx["body"]
     lines, subtotal = price_lines(b.get("lines"))
     with db() as con:
@@ -469,6 +478,51 @@ def h_arrived(ctx, public_id):
         return serialize_order(get_order(con, public_id))
 
 
+def h_staff_member(ctx):
+    require_staff(ctx["headers"])
+    phone = clean_phone(ctx["body"].get("phone"))
+    with db() as con:
+        member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
+    if not member:
+        raise ApiError(404, "No rewards account found. Ask the customer to join first.")
+    return {"customer": public_customer(member)}
+
+
+def h_staff_credit(ctx):
+    require_staff(ctx["headers"])
+    body = ctx["body"]
+    phone = clean_phone(body.get("phone"))
+    receipt = str(body.get("receipt") or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{0,59}", receipt):
+        raise ApiError(400, "Enter a receipt reference using letters, numbers, dashes, or underscores.")
+    amount = str(body.get("subtotal") or "").strip()
+    if not re.fullmatch(r"[0-9]{1,5}(?:\.[0-9]{1,2})?", amount):
+        raise ApiError(400, "Enter the purchase subtotal, such as 7.50.")
+    dollars, _, cents = amount.partition(".")
+    subtotal_cents = int(dollars) * 100 + int(cents.ljust(2, "0"))
+    points = (subtotal_cents // 100) * CFG["points_per_dollar"]
+    if points < 1:
+        raise ApiError(400, "The subtotal must earn at least one point.")
+    with LOCK, db() as con:
+        member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
+        if not member:
+            raise ApiError(404, "No rewards account found. Ask the customer to join first.")
+        result = con.execute(
+            "INSERT INTO receipt_credits VALUES (?, ?, ?, ?) ON CONFLICT(receipt) DO NOTHING",
+            (receipt, phone, subtotal_cents, points),
+        )
+        already_credited = result.rowcount == 0
+        if already_credited:
+            saved = con.execute("SELECT * FROM receipt_credits WHERE receipt=?", (receipt,)).fetchone()
+            if saved["phone"] != phone or saved["subtotal_cents"] != subtotal_cents:
+                raise ApiError(409, "That receipt reference has already been used.")
+            points = saved["points"]
+        else:
+            add_points(con, phone, points, f"In-store purchase · {receipt}")
+            member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
+    return {"customer": public_customer(member), "points": points, "already_credited": already_credited}
+
+
 def h_staff_orders(ctx):
     require_staff(ctx["headers"])
     with db() as con:
@@ -477,7 +531,8 @@ def h_staff_orders(ctx):
             "(status IN ('picked_up','cancelled') AND created >= ?) ORDER BY pickup_time, id",
             (*ACTIVE, (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"))).fetchall()
         return {"orders": [serialize_order(r, staff=True) for r in rows],
-                "paused": get_setting(con, "paused", "0") == "1"}
+                "paused": get_setting(con, "paused", "0") == "1",
+                "ordering_enabled": CFG["ordering_enabled"]}
 
 
 def h_staff_status(ctx, public_id):
@@ -503,6 +558,8 @@ def h_staff_status(ctx, public_id):
 
 def h_staff_pause(ctx):
     require_staff(ctx["headers"])
+    if not CFG["ordering_enabled"]:
+        raise ApiError(409, "Online ordering is on hold.")
     paused = bool(ctx["body"].get("paused"))
     with db() as con:
         set_setting(con, "paused", "1" if paused else "0")
@@ -521,6 +578,8 @@ ROUTES = [
     ("POST", r"/api/orders", h_create_order),
     ("GET", r"/api/orders/([A-Za-z0-9]+)", h_get_order),
     ("POST", r"/api/orders/([A-Za-z0-9]+)/arrived", h_arrived),
+    ("POST", r"/api/staff/loyalty/lookup", h_staff_member),
+    ("POST", r"/api/staff/loyalty/credit", h_staff_credit),
     ("GET", r"/api/staff/orders", h_staff_orders),
     ("POST", r"/api/staff/orders/([A-Za-z0-9]+)/status", h_staff_status),
     ("POST", r"/api/staff/pause", h_staff_pause),

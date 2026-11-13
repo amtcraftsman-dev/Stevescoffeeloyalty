@@ -37,9 +37,27 @@ main{max-width:1100px}
       <input id="p" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required>
       <button class="btn ghost sm" id="show" type="button" aria-controls="p">Show</button>
     </div>
-    <button class="btn block" id="go" type="submit">Open order screen</button>
+    <button class="btn block" id="go" type="submit">Open staff dashboard</button>
     <p class="err" id="login-error" role="alert" hidden></p>
   </form>
+  <section class="card" id="loyalty" hidden>
+    <h1>Rewards</h1>
+    <form id="member-lookup">
+      <label for="member-phone">Member phone number</label>
+      <input id="member-phone" type="tel" autocomplete="off" required>
+      <button type="submit" class="btn" style="margin-top:12px">Find member</button>
+    </form>
+    <form id="credit-form" hidden>
+      <h2 id="member-name"></h2>
+      <p id="member-balance"></p>
+      <label for="receipt">Receipt reference</label>
+      <input id="receipt" maxlength="60" placeholder="For example, HAVEN-1042" autocomplete="off" required>
+      <label for="subtotal">Purchase subtotal after discounts, before tax</label>
+      <input id="subtotal" inputmode="decimal" placeholder="7.50" required>
+      <button type="submit" class="btn" style="margin-top:12px">Award points</button>
+    </form>
+    <p id="loyalty-message" role="status" hidden></p>
+  </section>
   <div id="app" hidden></div>
 </main>
 <script>
@@ -52,6 +70,70 @@ const input = $('#p');
 const submit = $('#go');
 const loginError = $('#login-error');
 const storageKey = 'steves-staff-code';
+let member = null;
+let lookupVersion = 0;
+
+function setMember(customer) {
+  member = customer;
+  $('#credit-form').hidden = !member;
+  $('#member-name').textContent = member?.name || '';
+  $('#member-balance').textContent = member ? `${member.points} points` : '';
+}
+
+function loyaltyMessage(message, error = false) {
+  const notice = $('#loyalty-message');
+  notice.textContent = message;
+  notice.className = error ? 'err' : 'notice';
+  notice.hidden = !message;
+}
+
+$('#member-phone').oninput = () => {
+  lookupVersion++;
+  setMember(null);
+  $('#credit-form').reset();
+  loyaltyMessage('');
+};
+
+$('#member-lookup').onsubmit = async event => {
+  event.preventDefault();
+  const phone = $('#member-phone').value;
+  const version = ++lookupVersion;
+  setMember(null);
+  $('#credit-form').reset();
+  loyaltyMessage('Looking up member…');
+  try {
+    const data = await api('/staff/loyalty/lookup', {phone});
+    if (version !== lookupVersion) return;
+    setMember(data.customer);
+    loyaltyMessage('');
+  } catch (error) {
+    if (version === lookupVersion) loyaltyMessage(error.message, true);
+  }
+};
+
+$('#credit-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button');
+  if (!member || button.disabled) return;
+  const version = lookupVersion;
+  const receipt = $('#receipt').value;
+  const subtotal = $('#subtotal').value;
+  button.disabled = true;
+  loyaltyMessage('Saving points…');
+  try {
+    const data = await api('/staff/loyalty/credit', {phone: member.phone, receipt, subtotal});
+    if (version !== lookupVersion) return;
+    setMember(data.customer);
+    event.target.reset();
+    loyaltyMessage(data.already_credited
+      ? `Receipt already credited for ${data.points} points.`
+      : `Added ${data.points} ${data.points === 1 ? 'point' : 'points'}.`);
+  } catch (error) {
+    if (version === lookupVersion) loyaltyMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
 
 function rememberCode(code) {
   try {
@@ -79,6 +161,12 @@ function showSignIn(message = '') {
   clearTimeout(timer);
   pin = '';
   seen = null;
+  lookupVersion++;
+  setMember(null);
+  $('#member-lookup').reset();
+  $('#credit-form').reset();
+  $('#loyalty').hidden = true;
+  loyaltyMessage('');
   rememberCode('');
   $('#ctl').replaceChildren();
   $('#app').hidden = true;
@@ -138,7 +226,8 @@ async function load() {
   if (!pin || pin !== currentCode) return false;
   rememberCode(pin);
   form.hidden = true;
-  $('#app').hidden = false;
+  $('#loyalty').hidden = false;
+  $('#app').hidden = !d.ordering_enabled && !d.orders.length;
   const ids = new Set(d.orders.map(o => o.id));
   if (seen && [...ids].some(i => !seen.has(i))) beep();
   seen = ids;
@@ -155,9 +244,9 @@ async function load() {
     })[o.status] || ''}${['received', 'preparing', 'ready'].includes(o.status) ? `<button class="btn ghost sm" data-s="cancelled" data-id="${o.id}">Cancel</button>` : ''}</div>
     <span class="small muted">${money(o.total_cents)}</span></div></div>`;
   const col = (t, s) => `<div class="col"><h2>${t} <span class="badge" style="background:var(--line)">${by(s).length}</span></h2>${by(s).map(ticket).join('') || '<div class="muted small">Nothing here</div>'}</div>`;
-  $('#ctl').innerHTML = `<button class="btn sm" id="pause" style="background:${d.paused ? 'var(--bad)' : 'var(--ok)'}">${d.paused ? '⏸ Online orders PAUSED, tap to resume' : '● Online orders ON, tap to pause'}</button> <button class="btn sm" id="out">Sign out</button>`;
+  $('#ctl').innerHTML = `${d.ordering_enabled ? `<button class="btn sm" id="pause" style="background:${d.paused ? 'var(--bad)' : 'var(--ok)'}">${d.paused ? '⏸ Online orders PAUSED, tap to resume' : '● Online orders ON, tap to pause'}</button>` : '<span class="small muted">Online ordering on hold</span>'} <button class="btn sm" id="out">Sign out</button>`;
   $('#out').onclick = () => { input.value = ''; showSignIn(); input.focus(); };
-  $('#pause').onclick = async () => { await api('/staff/pause', { paused: !d.paused }); load(); };
+  if (d.ordering_enabled) $('#pause').onclick = async () => { await api('/staff/pause', { paused: !d.paused }); load(); };
   $('#app').innerHTML = `<div class="cols">${col('New', 'received')}${col('Making', 'preparing')}${col('Ready', 'ready')}</div>
     <h2 style="margin-top:24px">Recently finished</h2>
     <div class="small muted">${d.orders.filter(o => ['picked_up', 'cancelled'].includes(o.status)).map(o => `#${esc(o.id.slice(-6))} ${esc(o.name)} (${o.status.replace('_', ' ')})`).join(' · ') || 'None'}</div>`;

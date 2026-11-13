@@ -1,6 +1,12 @@
 # Steve's Coffee | Order Ahead & Rewards Pilot
 
-The customer app is at `/` and the staff order screen is at `/staff`. See [DEPLOY.md](DEPLOY.md) for the Render setup and a staff test walkthrough.
+The customer rewards screen is at `/` and the staff dashboard is at `/staff`.
+
+## Loyalty-only pilot
+
+Online ordering is on hold by default. Members sign up or sign in to view their balance and activity. Staff find a member by phone number, then award points with a unique receipt reference and the purchase subtotal after discounts and before tax. Members earn one point per whole dollar. If multiple registers use the same receipt numbers, include a register or location prefix. Retrying the same receipt, member, and amount does not award points twice.
+
+The pilot uses its own points ledger. Reward redemption is on hold along with checkout. Existing orders can still be handled on the staff dashboard. Set `ORDERING_ENABLED=1` to restore online ordering. On the Free Render setup, a restart or redeploy can clear the temporary database, including receipt credits. See [DEPLOY.md](DEPLOY.md) for the original Render setup and order test walkthrough.
 
 ## Run locally
 
@@ -12,11 +18,11 @@ PILOT_CODE=local-test-access-code STAFF_PIN=local-staff-test-code ALWAYS_OPEN=1 
 
 Open http://localhost:8000 and use the local access code above. Use sample customer information. For the staff screen, also enter the separate local staff code. Use unique generated codes on Render.
 
-## What the pilot does
+## When online ordering is enabled
 
 Customers can create a test rewards account, order ahead for counter pickup, track the order, and see their points and reward activity. Staff uses the app's order screen to prepare orders and confirm pickups. The inherited sample program gives 10 welcome points and 1 point per whole dollar after the discount and before tax, when staff marks an order picked up. Sample rewards are a free drink for 100 points and a free bag of beans for 200 points. Cancellation returns points used on the order.
 
-The sample menu lives in `menu.json`. Rewards and earning rules are in `server.py`. Pilot customer phone numbers are unverified and use a four-digit PIN. Orders use simulated Clover and are pay at pickup. Pilot points are stored in SQLite and cover orders placed through this app only.
+The sample menu lives in `menu.json`. Rewards and earning rules are in `server.py`. Pilot customer phone numbers are unverified and use a four-digit PIN. Orders use simulated Clover and are pay at pickup. The SQLite ledger tracks points for app orders and staff-entered purchases.
 
 ## Settings
 

@@ -51,6 +51,10 @@ function lineDesc(line) {
 
 // ---------- layout ----------
 function renderNav() {
+  if (!S.config?.ordering_enabled) {
+    $('#nav').innerHTML = '<a href="#/rewards" class="on">Rewards</a>';
+    return;
+  }
   const h = location.hash || '#/';
   const on = p => (h === p || (p !== '#/' && h.startsWith(p))) ? 'on' : '';
   $('#nav').innerHTML = `
@@ -251,8 +255,8 @@ async function viewOrder(id) {
       ${o.discount_cents ? `<div class="row good"><span>Reward</span><span>−${money(o.discount_cents)}</span></div>` : ''}
       <div class="row"><b>Total (plus tax)</b><b>${money(o.total_cents)}</b></div></div>
       ${o.status === 'picked_up' && o.points_awarded ? `<div class="notice">You earned <b>${o.points_awarded} points</b> on this order.</div>` : ''}
-      ${!o.has_account && o.status !== 'cancelled' ? `<p class="muted small">Join <a href="#/rewards">rewards</a> next time to earn points on every order.</p>` : ''}
-      <a class="btn ghost block" href="#/">Back to menu</a>`);
+      ${!o.has_account && o.status !== 'cancelled' ? `<p class="muted small">Join <a href="#/rewards">rewards</a> to earn points on future purchases.</p>` : ''}
+      <a class="btn ghost block" href="#/">${S.config.ordering_enabled ? 'Back to menu' : 'Back to rewards'}</a>`);
     $('#here')?.addEventListener('click', async () => {
       try { await api(`/orders/${id}/arrived`, {}); draw(); }
       catch (e) { toast(e.message); }
@@ -274,19 +278,22 @@ async function viewRewards() {
   const d = await loadMe();
   if (!d) return viewAuth('signup');
   const me = d.customer, rw = S.config.rewards;
+  const orderingEnabled = S.config.ordering_enabled;
   const next = rw.find(r => r.cost > me.points);
   const pct = next ? Math.min(100, (me.points / next.cost) * 100) : 100;
   view(`<h1>Hi ${esc(me.name)}</h1>
     <div class="card balance-card"><div class="points">${me.points}</div><div class="muted">points</div>
       <div class="meter"><div style="width:${pct}%"></div></div>
-      <div class="small muted">${next ? `${next.cost - me.points} more points to unlock a <b>${esc(next.name.toLowerCase())}</b>` : 'You can redeem any reward!'}</div></div>
+      <div class="small muted">${next ? `${next.cost - me.points} more points to unlock a <b>${esc(next.name.toLowerCase())}</b>` : 'You’ve reached every reward milestone.'}</div></div>
     <div class="card"><h2 style="margin-top:0">Rewards</h2>
       ${rw.map(r => `<div class="reward"><div><b>${esc(r.name)}</b><div class="small muted">${r.cost} points</div></div>
-      ${me.points >= r.cost ? '<span class="pill ok">Ready to redeem</span>' : `<span class="pill">${r.cost - me.points} to go</span>`}</div>`).join('')}
-      <p class="small muted" style="margin-bottom:0">Earn 1 point per $1. Choose a reward at checkout.</p></div>
+      ${me.points >= r.cost ? `<span class="pill ok">${orderingEnabled ? 'Ready to redeem' : 'Goal reached'}</span>` : `<span class="pill">${r.cost - me.points} to go</span>`}</div>`).join('')}
+      <p class="small muted" style="margin-bottom:0">${orderingEnabled ? 'Earn points on purchases. Choose a reward at checkout.' : 'Earn 1 point per whole dollar before tax on in-store purchases. Reward redemption is on hold.'}</p></div>
     <h2>Recent activity</h2><div class="card">${d.ledger.length ? d.ledger.map(l => `<div class="row small" style="padding:4px 0"><span>${esc(l.reason)}</span><b class="${l.delta > 0 ? 'good' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('') : '<span class="muted">No activity yet.</span>'}</div>
-    <h2>Past orders</h2>${d.orders.length ? d.orders.map(o => `<a class="item" style="text-decoration:none;margin-bottom:8px" href="#/order/${o.id}"><span><b>#${esc(o.id.slice(-6))}</b><small>${o.lines.map(l => l.qty + '× ' + esc(l.name)).join(', ')}</small></span><span class="price">${money(o.total_cents)}</span></a>`).join('') : '<div class="card muted">No orders yet.</div>'}
+    ${orderingEnabled ? `<h2>Past orders</h2>${d.orders.length ? d.orders.map(o => `<a class="item" style="text-decoration:none;margin-bottom:8px" href="#/order/${o.id}"><span><b>#${esc(o.id.slice(-6))}</b><small>${o.lines.map(l => l.qty + '× ' + esc(l.name)).join(', ')}</small></span><span class="price">${money(o.total_cents)}</span></a>`).join('') : '<div class="card muted">No orders yet.</div>'}` : ''}
+    ${!orderingEnabled ? '<button class="btn block" id="refresh-points">Refresh points</button>' : ''}
     <button class="btn ghost block" id="out" style="margin-top:14px">Sign out</button>`);
+  $('#refresh-points')?.addEventListener('click', viewRewards);
   $('#out').onclick = async () => {
     try { await api('/logout', {}); }
     catch (e) { return toast(e.message); }
@@ -298,7 +305,7 @@ async function viewRewards() {
 function viewAuth(mode) {
   const su = mode === 'signup';
   view(`<h1>${su ? 'Join Steve\'s Rewards' : 'Welcome back'}</h1>
-    <div class="hero">Earn 1 point for every $1. Redeem 100 points for a free drink or 200 points for a free bag of beans. <b>Join today and get ${S.config.welcome_bonus} bonus points.</b></div>
+    <div class="hero">${S.config.ordering_enabled ? 'Earn 1 point for every $1. Redeem 100 points for a free drink or 200 points for a free bag of beans.' : 'Earn 1 point per whole dollar before tax. Give staff your rewards phone number at the counter.'} <b>Join today and get ${S.config.welcome_bonus} bonus points.</b></div>
     <div class="card">
       ${su ? '<label>Name</label><input id="n" maxlength="40" autocomplete="given-name">' : ''}
       <label>Mobile number</label><input id="ph" type="tel" inputmode="tel" placeholder="(555) 123-4567" autocomplete="tel">
@@ -318,16 +325,18 @@ function viewAuth(mode) {
 
 // ---------- router ----------
 async function route() {
-  clearTimeout(pollTimer); closeModal(); renderNav();
+  clearTimeout(pollTimer); closeModal();
   const h = location.hash || '#/';
   try {
     if (S.token && !S.me) await loadMe();
     S.config = await api('/config');
-    if (h === '#/') await viewMenu();
+    document.title = S.config.ordering_enabled ? "Steve's Coffee | Order Ahead & Rewards" : "Steve's Coffee | Rewards";
+    renderNav();
+    if (h.startsWith('#/order/')) await viewOrder(h.slice(8));
+    else if (!S.config.ordering_enabled || h === '#/rewards') await viewRewards();
+    else if (h === '#/') await viewMenu();
     else if (h === '#/cart') viewCart();
     else if (h === '#/checkout') await viewCheckout();
-    else if (h === '#/rewards') await viewRewards();
-    else if (h.startsWith('#/order/')) await viewOrder(h.slice(8));
     else await viewMenu();
   } catch (e) { view(`<div class="err">${esc(e.message)}</div>`); }
 }

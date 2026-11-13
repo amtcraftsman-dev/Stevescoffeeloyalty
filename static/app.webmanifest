@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Steve's Coffee",
   "short_name": "Steve's Coffee",
-  "description": "Order ahead and track your Steve's Coffee rewards.",
+  "description": "Track your Steve's Coffee rewards.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
