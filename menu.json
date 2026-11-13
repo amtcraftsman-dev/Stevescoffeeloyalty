@@ -39,10 +39,6 @@
     {"id": "chai", "name": "Chai Latte", "category": "drink", "price": 495, "description": "Spiced black tea with steamed milk.", "groups": ["size", "milk"]},
     {"id": "hotchoc", "name": "Hot Chocolate", "category": "drink", "price": 395, "description": "Rich and creamy, no coffee.", "groups": ["size", "milk"]},
 
-    {"id": "croissant", "name": "Butter Croissant", "category": "pastry", "price": 350, "description": "Flaky, baked fresh each morning.", "groups": []},
-    {"id": "muffin", "name": "Blueberry Muffin", "category": "pastry", "price": 325, "description": "Loaded with blueberries.", "groups": []},
-    {"id": "cinroll", "name": "Cinnamon Roll", "category": "pastry", "price": 425, "description": "Warm with cream cheese icing.", "groups": []},
-    {"id": "banana", "name": "Banana Bread", "category": "pastry", "price": 350, "description": "A thick slice, lightly toasted.", "groups": []},
 
     {"id": "beans", "name": "House Blend Beans (12oz)", "category": "beans", "price": 1400, "description": "Our signature medium roast, whole bean.", "groups": []}
   ]

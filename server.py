@@ -46,7 +46,6 @@ PILOT_PROOF = hashlib.sha256(("steves-pilot:" + PILOT_CODE).encode()).hexdigest(
 SESSION_DAYS = 7
 
 REWARDS = [
-    {"id": "pastry", "name": "Free pastry", "cost": 50, "category": "pastry"},
     {"id": "drink", "name": "Free handcrafted drink", "cost": 100, "category": "drink"},
     {"id": "beans", "name": "Free bag of beans", "cost": 200, "category": "beans"},
 ]

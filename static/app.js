@@ -87,7 +87,7 @@ async function viewMenu() {
       <a class="btn" href="#/rewards">${me ? 'See rewards' : 'Join rewards'}</a>
     </div>
   </section>`;
-  const cats = [['drink', 'Drinks'], ['pastry', 'Pastries'], ['beans', 'Beans']];
+  const cats = [['drink', 'Drinks'], ['beans', 'Beans']];
   view(`${active}${banner}${welcome}
     <div class="menu-heading"><h2>Pickup menu</h2>
     <div class="tabs" aria-label="Menu categories">${cats.map(([k, n]) => `<button class="tab ${S.cat === k ? 'on' : ''}" data-cat="${k}" aria-pressed="${S.cat === k}">${n}</button>`).join('')}</div></div>
@@ -298,7 +298,7 @@ async function viewRewards() {
 function viewAuth(mode) {
   const su = mode === 'signup';
   view(`<h1>${su ? 'Join Steve\'s Rewards' : 'Welcome back'}</h1>
-    <div class="hero">Earn 1 point for every $1. Get a free pastry at 50, a free drink at 100. <b>Join today and get ${S.config.welcome_bonus} bonus points.</b></div>
+    <div class="hero">Earn 1 point for every $1. Redeem 100 points for a free drink or 200 points for a free bag of beans. <b>Join today and get ${S.config.welcome_bonus} bonus points.</b></div>
     <div class="card">
       ${su ? '<label>Name</label><input id="n" maxlength="40" autocomplete="given-name">' : ''}
       <label>Mobile number</label><input id="ph" type="tel" inputmode="tel" placeholder="(555) 123-4567" autocomplete="tel">
@@ -335,6 +335,12 @@ async function route() {
 (async () => {
   try {
     S.menu = await api('/menu');
+    const availableIds = new Set(S.menu.items.map(item => item.id));
+    const availableCart = S.cart.filter(line => availableIds.has(line.id));
+    if (availableCart.length !== S.cart.length) {
+      S.cart = availableCart;
+      saveCart();
+    }
     window.addEventListener('hashchange', route);
     await route();
   } catch (e) {

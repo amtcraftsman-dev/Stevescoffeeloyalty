@@ -14,7 +14,7 @@ Open http://localhost:8000 and use the local access code above. Use sample custo
 
 ## What the pilot does
 
-Customers can create a test rewards account, order ahead for counter pickup, track the order, and see their points and reward activity. Staff uses the app's order screen to prepare orders and confirm pickups. The inherited sample program gives 10 welcome points and 1 point per whole dollar after the discount and before tax, when staff marks an order picked up. Sample rewards cost 50, 100, and 200 points. Cancellation returns points used on the order.
+Customers can create a test rewards account, order ahead for counter pickup, track the order, and see their points and reward activity. Staff uses the app's order screen to prepare orders and confirm pickups. The inherited sample program gives 10 welcome points and 1 point per whole dollar after the discount and before tax, when staff marks an order picked up. Sample rewards are a free drink for 100 points and a free bag of beans for 200 points. Cancellation returns points used on the order.
 
 The sample menu lives in `menu.json`. Rewards and earning rules are in `server.py`. Pilot customer phone numbers are unverified and use a four-digit PIN. Orders use simulated Clover and are pay at pickup. Pilot points are stored in SQLite and cover orders placed through this app only.
 
