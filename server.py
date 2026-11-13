@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import clover
 
@@ -38,7 +38,7 @@ CFG = {
     "points_per_dollar": 1,
     "welcome_bonus": 10,
 }
-STAFF_PIN = os.environ.get("STAFF_PIN", "")
+STAFF_PIN = os.environ.get("STAFF_PIN", "").strip()
 PILOT_CODE = os.environ.get("PILOT_CODE", "")
 ON_RENDER = os.environ.get("RENDER") == "true"
 PILOT_COOKIE = "steves_pilot"
@@ -156,7 +156,15 @@ def public_customer(c):
 
 
 def require_staff(headers):
-    if not STAFF_PIN or not hmac.compare_digest(headers.get("X-Staff-Pin", "").encode(), STAFF_PIN.encode()):
+    encoded = headers.get("X-Staff-Code")
+    if encoded is None:
+        code = headers.get("X-Staff-Pin", "")
+    else:
+        try:
+            code = unquote(encoded, errors="strict")
+        except UnicodeError:
+            raise ApiError(401, "Wrong staff code.") from None
+    if not STAFF_PIN or not hmac.compare_digest(code.strip().encode(), STAFF_PIN.encode()):
         raise ApiError(401, "Wrong staff code.")
 
 

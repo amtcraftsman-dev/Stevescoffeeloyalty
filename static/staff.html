@@ -15,6 +15,11 @@ main{max-width:1100px}
 .ticket ul{margin:8px 0;padding-left:18px}
 .acts{display:flex;gap:6px;flex-wrap:wrap}
 .tag{display:inline-block;font-size:.72rem;font-weight:700;background:var(--line);padding:2px 7px;border-radius:99px;margin-right:4px}
+.staff-login{max-width:440px;margin:40px auto}
+.staff-login .code-row{display:flex;align-items:stretch;gap:8px}
+.staff-login .code-row input{min-width:0}
+.staff-login .btn.block{margin-top:12px}
+[hidden]{display:none!important}
 .tag.red{background:#fbe9e7;color:var(--bad)}.tag.gold{background:#fff4d6;color:#6a4b00}
 </style>
 </head>
@@ -23,15 +28,42 @@ main{max-width:1100px}
   <span class="logo"><img src="/steves-logo.png" width="60" height="48" alt="">Steve’s Coffee <span class="staff-label">Staff</span></span>
   <span id="ctl"></span>
 </div></header>
-<main id="app"></main>
+<main>
+  <form id="staff-login" class="card staff-login">
+    <h1>Staff sign-in</h1>
+    <p class="muted">Enter the staff code set for this app in Render.</p>
+    <label for="p">Staff code</label>
+    <div class="code-row">
+      <input id="p" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+      <button class="btn ghost sm" id="show" type="button" aria-controls="p">Show</button>
+    </div>
+    <button class="btn block" id="go" type="submit">Open order screen</button>
+    <p class="err" id="login-error" role="alert" hidden></p>
+  </form>
+  <div id="app" hidden></div>
+</main>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 const money = c => '$' + (c / 100).toFixed(2);
-let pin = sessionStorage.getItem('pin') || '', seen = null, timer;
+let pin = '', seen = null, timer;
+const form = $('#staff-login');
+const input = $('#p');
+const submit = $('#go');
+const loginError = $('#login-error');
+const storageKey = 'steves-staff-code';
+
+function rememberCode(code) {
+  try {
+    if (code) sessionStorage.setItem(storageKey, code);
+    else sessionStorage.removeItem(storageKey);
+  } catch {
+    // The order screen can still work for this page when browser storage is blocked.
+  }
+}
 
 async function api(path, body) {
-  const o = { headers: { 'X-Staff-Pin': pin } };
+  const o = { headers: { 'X-Staff-Code': encodeURIComponent(pin) }, cache: 'no-store' };
   if (body !== undefined) {
     o.method = 'POST';
     o.headers['Content-Type'] = 'application/json';
@@ -43,16 +75,46 @@ async function api(path, body) {
   return d;
 }
 
-function login(msg) {
+function showSignIn(message = '') {
   clearTimeout(timer);
-  $('#ctl').innerHTML = '';
-  $('#app').innerHTML = `<div class="card" style="max-width:440px;margin:40px auto"><h1>Staff sign-in</h1>
-    ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
-    <label for="p">Staff code</label><input id="p" type="password" autocomplete="current-password" autofocus>
-    <button class="btn block" id="go" style="margin-top:12px">Open order screen</button></div>`;
-  const go = () => { pin = $('#p').value; sessionStorage.setItem('pin', pin); load(); };
-  $('#go').onclick = go; $('#p').onkeydown = e => e.key === 'Enter' && go();
+  pin = '';
+  seen = null;
+  rememberCode('');
+  $('#ctl').replaceChildren();
+  $('#app').hidden = true;
+  $('#app').replaceChildren();
+  form.hidden = false;
+  loginError.textContent = message;
+  loginError.hidden = !message;
 }
+
+$('#show').onclick = () => {
+  const reveal = input.type === 'password';
+  input.type = reveal ? 'text' : 'password';
+  $('#show').textContent = reveal ? 'Hide' : 'Show';
+  input.focus();
+};
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (submit.disabled) return;
+  pin = input.value.trim();
+  if (!pin) {
+    showSignIn('Enter your staff code.');
+    return;
+  }
+  submit.disabled = true;
+  loginError.hidden = true;
+  try {
+    if (await load()) {
+      input.value = '';
+      input.type = 'password';
+      $('#show').textContent = 'Show';
+    }
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 function beep() {
   try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + .25); } catch { }
@@ -60,9 +122,23 @@ function beep() {
 
 async function load() {
   clearTimeout(timer);
+  const currentCode = pin;
   let d;
   try { d = await api('/staff/orders'); }
-  catch (e) { return e.status === 401 ? login(pin ? 'Check your staff code and try again.' : '') : $('#app').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  catch (e) {
+    if (pin !== currentCode) return false;
+    const message = e.status === 401
+      ? 'That code does not match STAFF_PIN in Render.'
+      : e.status === 403
+        ? 'Pilot access expired. Reload this page and enter the pilot code first.'
+        : 'Could not reach the order screen. Try again in a moment.';
+    showSignIn(message);
+    return false;
+  }
+  if (!pin || pin !== currentCode) return false;
+  rememberCode(pin);
+  form.hidden = true;
+  $('#app').hidden = false;
   const ids = new Set(d.orders.map(o => o.id));
   if (seen && [...ids].some(i => !seen.has(i))) beep();
   seen = ids;
@@ -80,7 +156,7 @@ async function load() {
     <span class="small muted">${money(o.total_cents)}</span></div></div>`;
   const col = (t, s) => `<div class="col"><h2>${t} <span class="badge" style="background:var(--line)">${by(s).length}</span></h2>${by(s).map(ticket).join('') || '<div class="muted small">Nothing here</div>'}</div>`;
   $('#ctl').innerHTML = `<button class="btn sm" id="pause" style="background:${d.paused ? 'var(--bad)' : 'var(--ok)'}">${d.paused ? '⏸ Online orders PAUSED, tap to resume' : '● Online orders ON, tap to pause'}</button> <button class="btn sm" id="out">Sign out</button>`;
-  $('#out').onclick = () => { pin = ''; sessionStorage.removeItem('pin'); seen = null; login(); };
+  $('#out').onclick = () => { input.value = ''; showSignIn(); input.focus(); };
   $('#pause').onclick = async () => { await api('/staff/pause', { paused: !d.paused }); load(); };
   $('#app').innerHTML = `<div class="cols">${col('New', 'received')}${col('Making', 'preparing')}${col('Ready', 'ready')}</div>
     <h2 style="margin-top:24px">Recently finished</h2>
@@ -91,8 +167,16 @@ async function load() {
     load();
   });
   timer = setTimeout(load, 5000);
+  return true;
 }
-pin ? load() : login();
+
+try {
+  sessionStorage.removeItem('pin');
+  pin = sessionStorage.getItem(storageKey) || '';
+} catch {
+  // Leave the sign-in form available when browser storage is blocked.
+}
+if (pin) load();
 </script>
 </body>
 </html>
