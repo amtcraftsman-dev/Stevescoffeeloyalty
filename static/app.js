@@ -1,5 +1,6 @@
 const $ = (s, el = document) => el.querySelector(s);
 const money = c => '$' + (c / 100).toFixed(2);
+const pointsRule = () => `Earn 1 point per full ${money(S.config.cents_per_point).replace(/\.00$/, '')} on each purchase after discounts and before tax.`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -83,7 +84,7 @@ async function viewMenu() {
   const me = S.me;
   const promo = me
     ? `<p>Hi ${esc(me.name)}. You have <b>${me.points} points</b>.</p>`
-    : `<p>Join Steve’s Rewards and get <b>${S.config.welcome_bonus} bonus points</b>.</p>`;
+    : `<p>${pointsRule()}</p>`;
   const welcome = `<section class="menu-hero">
     <div class="menu-hero-copy">
       <h1>Order ahead.</h1>
@@ -283,12 +284,12 @@ async function viewRewards() {
   const pct = next ? Math.min(100, (me.points / next.cost) * 100) : 100;
   view(`<h1>Hi ${esc(me.name)}</h1>
     <div class="card balance-card"><div class="points">${me.points}</div><div class="muted">points</div>
-      <div class="meter"><div style="width:${pct}%"></div></div>
-      <div class="small muted">${next ? `${next.cost - me.points} more points to unlock a <b>${esc(next.name.toLowerCase())}</b>` : 'You’ve reached every reward milestone.'}</div></div>
-    <div class="card"><h2 style="margin-top:0">Rewards</h2>
+      ${orderingEnabled ? `<div class="meter"><div style="width:${pct}%"></div></div>
+      <div class="small muted">${next ? `${next.cost - me.points} more points to unlock a <b>${esc(next.name.toLowerCase())}</b>` : 'You’ve reached every reward milestone.'}</div>` : ''}</div>
+    ${orderingEnabled ? `<div class="card"><h2 style="margin-top:0">Rewards</h2>
       ${rw.map(r => `<div class="reward"><div><b>${esc(r.name)}</b><div class="small muted">${r.cost} points</div></div>
-      ${me.points >= r.cost ? `<span class="pill ok">${orderingEnabled ? 'Ready to redeem' : 'Goal reached'}</span>` : `<span class="pill">${r.cost - me.points} to go</span>`}</div>`).join('')}
-      <p class="small muted" style="margin-bottom:0">${orderingEnabled ? 'Earn points on purchases. Choose a reward at checkout.' : 'Earn 1 point per whole dollar before tax on in-store purchases. Reward redemption is on hold.'}</p></div>
+      ${me.points >= r.cost ? `<span class="pill ok">Ready to redeem</span>` : `<span class="pill">${r.cost - me.points} to go</span>`}</div>`).join('')}
+      <p class="small muted" style="margin-bottom:0">${pointsRule()} Choose a reward at checkout.</p></div>` : `<div class="card"><h2>How to earn points</h2><p>${pointsRule()} Give staff the phone number or email you used to join.</p></div>`}
     <h2>Recent activity</h2><div class="card">${d.ledger.length ? d.ledger.map(l => `<div class="row small" style="padding:4px 0"><span>${esc(l.reason)}</span><b class="${l.delta > 0 ? 'good' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('') : '<span class="muted">No activity yet.</span>'}</div>
     ${orderingEnabled ? `<h2>Past orders</h2>${d.orders.length ? d.orders.map(o => `<a class="item" style="text-decoration:none;margin-bottom:8px" href="#/order/${o.id}"><span><b>#${esc(o.id.slice(-6))}</b><small>${o.lines.map(l => l.qty + '× ' + esc(l.name)).join(', ')}</small></span><span class="price">${money(o.total_cents)}</span></a>`).join('') : '<div class="card muted">No orders yet.</div>'}` : ''}
     ${!orderingEnabled ? '<button class="btn block" id="refresh-points">Refresh points</button>' : ''}
@@ -305,21 +306,42 @@ async function viewRewards() {
 function viewAuth(mode) {
   const su = mode === 'signup';
   view(`<h1>${su ? 'Join Steve\'s Rewards' : 'Welcome back'}</h1>
-    <div class="hero">${S.config.ordering_enabled ? 'Earn 1 point for every $1. Redeem 100 points for a free drink or 200 points for a free bag of beans.' : 'Earn 1 point per whole dollar before tax. Give staff your rewards phone number at the counter.'} <b>Join today and get ${S.config.welcome_bonus} bonus points.</b></div>
-    <div class="card">
-      ${su ? '<label>Name</label><input id="n" maxlength="40" autocomplete="given-name">' : ''}
-      <label>Mobile number</label><input id="ph" type="tel" inputmode="tel" placeholder="(555) 123-4567" autocomplete="tel">
-      <label>4-digit PIN</label><input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="${su ? 'new-password' : 'current-password'}">
-      <div id="err"></div>
-      <button class="btn block" id="go" style="margin-top:14px">${su ? 'Join rewards' : 'Sign in'}</button>
-      <p class="small muted" style="text-align:center"><a href="#" id="sw">${su ? 'Already a member? Sign in' : 'New here? Join rewards'}</a></p>
-    </div>`);
-  $('#sw').onclick = e => { e.preventDefault(); viewAuth(su ? 'login' : 'signup'); };
-  $('#go').onclick = async () => {
+    <div class="hero">${pointsRule()}</div>
+    <form class="card" id="rewards-auth">
+      ${su ? '<label for="n">Name</label><input id="n" maxlength="40" autocomplete="name" required>' : ''}
+      <label for="identifier">Phone number or email</label>
+      <input id="identifier" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
+      <label for="password">${su ? 'Create a password' : 'Password or existing PIN'}</label>
+      <input id="password" type="password" ${su ? 'minlength="8"' : ''} maxlength="128" autocomplete="${su ? 'new-password' : 'current-password'}" required>
+      ${su ? '<p class="small muted">Use at least 8 characters.</p>' : ''}
+      <div id="err" role="alert"></div>
+      <button type="submit" class="btn block" id="go" style="margin-top:14px">${su ? 'Join rewards' : 'Sign in'}</button>
+    </form>
+    <p class="small muted" style="text-align:center"><button type="button" class="btn ghost sm" id="sw">${su ? 'Already a member? Sign in' : 'New here? Join rewards'}</button></p>`);
+  $('#sw').onclick = () => viewAuth(su ? 'login' : 'signup');
+  $('#rewards-auth').onsubmit = async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('#go');
+    if (button.disabled) return;
+    button.disabled = true;
+    $('#sw').disabled = true;
     try {
-      const d = await api(su ? '/signup' : '/login', { name: $('#n')?.value, phone: $('#ph').value, pin: $('#pin').value });
-      S.token = d.token; S.me = d.customer; store.set('token', d.token); renderNav(); viewRewards();
-    } catch (e) { $('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+      const d = await api(su ? '/signup' : '/login', {
+        name: $('#n')?.value, identifier: $('#identifier').value, password: $('#password').value,
+      });
+      S.token = d.token;
+      S.me = d.customer;
+      store.set('token', d.token);
+      renderNav();
+      await viewRewards();
+    } catch (e) {
+      form.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    } finally {
+      button.disabled = false;
+      const switchButton = $('#sw');
+      if (switchButton) switchButton.disabled = false;
+    }
   };
 }
 

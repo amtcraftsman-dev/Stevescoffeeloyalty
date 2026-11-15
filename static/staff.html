@@ -43,8 +43,8 @@ main{max-width:1100px}
   <section class="card" id="loyalty" hidden>
     <h1>Rewards</h1>
     <form id="member-lookup">
-      <label for="member-phone">Member phone number</label>
-      <input id="member-phone" type="tel" autocomplete="off" required>
+      <label for="member-identifier">Member phone number or email</label>
+      <input id="member-identifier" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="254" required>
       <button type="submit" class="btn" style="margin-top:12px">Find member</button>
     </form>
     <form id="credit-form" hidden>
@@ -87,7 +87,7 @@ function loyaltyMessage(message, error = false) {
   notice.hidden = !message;
 }
 
-$('#member-phone').oninput = () => {
+$('#member-identifier').oninput = () => {
   lookupVersion++;
   setMember(null);
   $('#credit-form').reset();
@@ -96,13 +96,13 @@ $('#member-phone').oninput = () => {
 
 $('#member-lookup').onsubmit = async event => {
   event.preventDefault();
-  const phone = $('#member-phone').value;
+  const identifier = $('#member-identifier').value;
   const version = ++lookupVersion;
   setMember(null);
   $('#credit-form').reset();
   loyaltyMessage('Looking up member…');
   try {
-    const data = await api('/staff/loyalty/lookup', {phone});
+    const data = await api('/staff/loyalty/lookup', {identifier});
     if (version !== lookupVersion) return;
     setMember(data.customer);
     loyaltyMessage('');
@@ -121,7 +121,7 @@ $('#credit-form').onsubmit = async event => {
   button.disabled = true;
   loyaltyMessage('Saving points…');
   try {
-    const data = await api('/staff/loyalty/credit', {phone: member.phone, receipt, subtotal});
+    const data = await api('/staff/loyalty/credit', {identifier: member.identifier, receipt, subtotal});
     if (version !== lookupVersion) return;
     setMember(data.customer);
     event.target.reset();

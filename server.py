@@ -36,8 +36,7 @@ CFG = {
     "curbside_enabled": os.environ.get("CURBSIDE_ENABLED", "0") == "1",
     "always_open": os.environ.get("ALWAYS_OPEN", "0") == "1",  # demo/testing only
     "ordering_enabled": os.environ.get("ORDERING_ENABLED") == "1",
-    "points_per_dollar": 1,
-    "welcome_bonus": 10,
+    "cents_per_point": 500,
 }
 STAFF_PIN = os.environ.get("STAFF_PIN", "").strip()
 PILOT_CODE = os.environ.get("PILOT_CODE", "")
@@ -131,8 +130,25 @@ def clean_phone(p):
     return d
 
 
-def hash_pin(pin, salt):
-    return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 100_000).hex()
+def account_identifier(body):
+    value = body.get("identifier", body.get("phone"))
+    value = value.strip() if isinstance(value, str) else ""
+    if "@" in value:
+        if len(value) <= 254 and re.fullmatch(r"[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+", value):
+            return value.lower()
+        raise ApiError(400, "Enter a valid email address.")
+    if re.fullmatch(r"[+0-9(). -]{10,25}", value):
+        return clean_phone(value)
+    raise ApiError(400, "Enter a valid email address or 10-digit phone number.")
+
+
+def hash_secret(secret, salt):
+    # Old accounts store a bare salt and keep their existing four-digit PIN.
+    version, _, raw_salt = salt.partition(":")
+    iterations = 600_000 if version == "v2" else 100_000
+    return hashlib.pbkdf2_hmac(
+        "sha256", secret.encode(), bytes.fromhex(raw_salt or version), iterations
+    ).hex()
 
 
 def session_cutoff():
@@ -156,7 +172,10 @@ def customer_from(con, headers):
 
 
 def public_customer(c):
-    return {"name": c["name"], "phone": c["phone"], "points": c["points"]}
+    identifier = c["phone"]
+    is_email = "@" in identifier
+    return {"name": c["name"], "identifier": identifier, "points": c["points"],
+            "phone": None if is_email else identifier, "email": identifier if is_email else None}
 
 
 def require_staff(headers):
@@ -288,7 +307,7 @@ def serialize_order(o, staff=False):
     }
     if staff:
         d["vehicle"] = o["vehicle"]
-        d["phone_last4"] = (o["phone"] or "")[-4:]
+        d["phone_last4"] = (o["phone"] or "")[-4:] if "@" not in (o["phone"] or "") else ""
         d["clover_id"] = o["clover_id"]
     return d
 
@@ -299,8 +318,8 @@ def h_config(ctx):
     with db() as con:
         s = compute_slots(con)
     return {"shop_name": CFG["shop_name"], "curbside_enabled": CFG["curbside_enabled"],
-            "rewards": REWARDS, "welcome_bonus": CFG["welcome_bonus"],
-            "ordering_enabled": CFG["ordering_enabled"], "points_per_dollar": CFG["points_per_dollar"],
+            "rewards": REWARDS,
+            "ordering_enabled": CFG["ordering_enabled"], "cents_per_point": CFG["cents_per_point"],
             "ordering": {k: s[k] for k in ("open", "paused", "reason")},
             "clover": CLOVER.name}
 
@@ -316,44 +335,49 @@ def h_slots(ctx):
 
 def h_signup(ctx):
     b = ctx["body"]
-    phone, name, pin = clean_phone(b.get("phone")), str(b.get("name", "")).strip()[:40], str(b.get("pin", ""))
+    identifier = account_identifier(b)
+    name = str(b.get("name") or "").strip()[:40]
+    password = b.get("password")
     if not name:
         raise ApiError(400, "Please enter your name.")
-    if not re.fullmatch(r"[0-9]{4}", pin):
-        raise ApiError(400, "PIN must be 4 digits.")
+    if not isinstance(password, str) or not 8 <= len(password) <= 128 or not password.strip():
+        raise ApiError(400, "Create a password from 8 to 128 characters.")
+    salt = "v2:" + secrets.token_hex(16)
+    digest = hash_secret(password, salt)
     with LOCK, db() as con:
-        if con.execute("SELECT 1 FROM customers WHERE phone=?", (phone,)).fetchone():
-            raise ApiError(409, "That number already has an account. Try signing in.")
-        salt = secrets.token_hex(16)
+        # The existing phone column is the account key referenced by balances,
+        # sessions and orders. Email identifiers are disjoint from phone numbers.
+        if con.execute("SELECT 1 FROM customers WHERE phone=?", (identifier,)).fetchone():
+            raise ApiError(409, "That phone or email already has an account. Try signing in.")
         con.execute("INSERT INTO customers(phone,name,pin_salt,pin_hash,points,created) VALUES(?,?,?,?,0,?)",
-                    (phone, name, salt, hash_pin(pin, salt), stamp()))
-        add_points(con, phone, CFG["welcome_bonus"], "Welcome bonus")
-        tok = new_session(con, phone)
-        c = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
+                    (identifier, name, salt, digest, stamp()))
+        tok = new_session(con, identifier)
+        c = con.execute("SELECT * FROM customers WHERE phone=?", (identifier,)).fetchone()
     return {"token": tok, "customer": public_customer(c)}
 
 
 def h_login(ctx):
     b = ctx["body"]
-    phone, pin = clean_phone(b.get("phone")), str(b.get("pin", ""))
-    if not re.fullmatch(r"[0-9]{4}", pin):
-        raise ApiError(401, "Wrong phone number or PIN.")
+    identifier = account_identifier(b)
+    password = b.get("password", b.get("pin"))
+    if not isinstance(password, str) or not 1 <= len(password) <= 128:
+        raise ApiError(401, "Check your phone or email and password.")
     now = datetime.now().timestamp()
     with LOCK, db() as con:
         for key, attempts in list(FAILED_LOGINS.items()):
             if now - attempts[-1] >= 600:
                 del FAILED_LOGINS[key]
-        recent = [t for t in FAILED_LOGINS.get(phone, []) if now - t < 600]
+        recent = [t for t in FAILED_LOGINS.get(identifier, []) if now - t < 600]
         if len(recent) >= 5 or (not recent and len(FAILED_LOGINS) >= 2048):
             raise ApiError(429, "Too many attempts. Try again in a few minutes.")
         c = con.execute("SELECT * FROM customers WHERE phone=?",
-                        (phone,)).fetchone()
-        ok = c and hmac.compare_digest(hash_pin(pin, c["pin_salt"]), c["pin_hash"])
+                        (identifier,)).fetchone()
+        ok = c and hmac.compare_digest(hash_secret(password, c["pin_salt"]), c["pin_hash"])
         if not ok:
-            FAILED_LOGINS[phone] = recent + [now]
-            raise ApiError(401, "Wrong phone number or PIN.")
-        FAILED_LOGINS.pop(phone, None)
-        return {"token": new_session(con, phone), "customer": public_customer(c)}
+            FAILED_LOGINS[identifier] = recent + [now]
+            raise ApiError(401, "Check your phone or email and password.")
+        FAILED_LOGINS.pop(identifier, None)
+        return {"token": new_session(con, identifier), "customer": public_customer(c)}
 
 
 def h_logout(ctx):
@@ -384,7 +408,7 @@ def h_quote(ctx):
     discount, reward = apply_reward(lines, subtotal, b.get("reward_id"), c)
     return {"lines": lines, "subtotal_cents": subtotal, "discount_cents": discount,
             "total_cents": subtotal - discount,
-            "points_to_earn": ((subtotal - discount) // 100) * CFG["points_per_dollar"] if c else 0}
+            "points_to_earn": (subtotal - discount) // CFG["cents_per_point"] if c else 0}
 
 
 def h_create_order(ctx):
@@ -480,7 +504,7 @@ def h_arrived(ctx, public_id):
 
 def h_staff_member(ctx):
     require_staff(ctx["headers"])
-    phone = clean_phone(ctx["body"].get("phone"))
+    phone = account_identifier(ctx["body"])
     with db() as con:
         member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
     if not member:
@@ -491,7 +515,7 @@ def h_staff_member(ctx):
 def h_staff_credit(ctx):
     require_staff(ctx["headers"])
     body = ctx["body"]
-    phone = clean_phone(body.get("phone"))
+    phone = account_identifier(body)
     receipt = str(body.get("receipt") or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{0,59}", receipt):
         raise ApiError(400, "Enter a receipt reference using letters, numbers, dashes, or underscores.")
@@ -500,9 +524,7 @@ def h_staff_credit(ctx):
         raise ApiError(400, "Enter the purchase subtotal, such as 7.50.")
     dollars, _, cents = amount.partition(".")
     subtotal_cents = int(dollars) * 100 + int(cents.ljust(2, "0"))
-    points = (subtotal_cents // 100) * CFG["points_per_dollar"]
-    if points < 1:
-        raise ApiError(400, "The subtotal must earn at least one point.")
+    points = subtotal_cents // CFG["cents_per_point"]
     with LOCK, db() as con:
         member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
         if not member:
@@ -518,6 +540,8 @@ def h_staff_credit(ctx):
                 raise ApiError(409, "That receipt reference has already been used.")
             points = saved["points"]
         else:
+            if points < 1:
+                raise ApiError(400, "This purchase needs a subtotal of at least $5 to earn a point.")
             add_points(con, phone, points, f"In-store purchase · {receipt}")
             member = con.execute("SELECT * FROM customers WHERE phone=?", (phone,)).fetchone()
     return {"customer": public_customer(member), "points": points, "already_credited": already_credited}
@@ -547,7 +571,7 @@ def h_staff_status(ctx, public_id):
             raise ApiError(409, f"Order is already {old.replace('_', ' ')}.")
         con.execute("UPDATE orders SET status=? WHERE id=?", (new, o["id"]))
         if new == "picked_up" and old != "picked_up" and o["phone"]:
-            pts = (o["total_cents"] // 100) * CFG["points_per_dollar"]
+            pts = o["total_cents"] // CFG["cents_per_point"]
             if pts:
                 add_points(con, o["phone"], pts, f"Order #{o['public_id'][-6:]}", o["id"])
                 con.execute("UPDATE orders SET points_awarded=? WHERE id=?", (pts, o["id"]))
