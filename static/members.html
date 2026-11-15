@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Steve’s Coffee | Members</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    main { width: min(100%, 1050px); }
+    .member-login { max-width: 440px; }
+    .member-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+    .member-controls > div { flex: 1 1 210px; }
+    .member-table { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; overflow-wrap: anywhere; }
+    th { background: var(--cream); }
+    td:last-child, th:last-child { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <header><div class="header-inner">
+    <span class="logo"><img src="/steves-logo.png" width="60" height="48" alt="">Steve’s Coffee</span>
+    <button id="lock" class="btn ghost sm" type="button" hidden>Lock directory</button>
+  </div></header>
+  <main>
+    <h1>Loyalty members</h1>
+    <form id="unlock" class="card member-login">
+      <label for="admin-code">Member admin code</label>
+      <input id="admin-code" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+      <button class="btn" type="submit" style="margin-top:12px">Open directory</button>
+      <p id="error" class="err" role="alert" hidden></p>
+    </form>
+    <section id="directory" class="card" aria-label="Loyalty member directory" hidden>
+      <div class="member-controls">
+        <div>
+          <label for="search">Search name, phone or email</label>
+          <input id="search" type="search">
+        </div>
+        <div>
+          <label for="signup-type">Signup method</label>
+          <select id="signup-type"><option value="">All members</option><option value="phone">Phone</option><option value="email">Email</option></select>
+        </div>
+        <button class="btn" type="button" id="export">Download all members CSV</button>
+      </div>
+      <p class="small muted" id="count" role="status"></p>
+      <div class="member-table">
+        <table aria-label="Member signups">
+          <thead><tr><th scope="col">Name</th><th scope="col">Phone</th><th scope="col">Email</th><th scope="col">Points</th><th scope="col">Joined</th></tr></thead>
+          <tbody id="members"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const form = $('unlock');
+    const input = $('admin-code');
+    let members = [];
+    let request = null;
+
+    function memberValues(member) {
+      return [member.name, member.phone, member.email, member.points, member.created];
+    }
+
+    function render() {
+      const query = $('search').value.trim().toLowerCase();
+      const method = $('signup-type').value;
+      const shown = members.filter(member => (!method || member[method])
+        && [member.name, member.phone, member.email].some(value => value?.toLowerCase().includes(query)));
+      $('count').textContent = `${shown.length} of ${members.length} members`;
+      const rows = document.createDocumentFragment();
+      for (const member of shown) {
+        const row = document.createElement('tr');
+        memberValues(member).forEach((value, index) => {
+          const cell = row.insertCell();
+          cell.textContent = (index === 4 ? value?.slice(0, 10) : value) ?? '—';
+        });
+        rows.append(row);
+      }
+      $('members').replaceChildren(rows);
+      $('export').disabled = !members.length;
+    }
+
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const submit = form.querySelector('button');
+      if (submit.disabled) return;
+      submit.disabled = true;
+      const controller = new AbortController();
+      request = controller;
+      $('error').hidden = true;
+      try {
+        const response = await fetch('/api/admin/members', {
+          headers: {'X-Member-Admin-Code': encodeURIComponent(input.value.trim())},
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load the directory.');
+        if (controller.signal.aborted) return;
+        members = data.members;
+        input.value = '';
+        form.hidden = true;
+        $('directory').hidden = false;
+        $('lock').hidden = false;
+        render();
+        $('search').focus();
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        $('error').textContent = error.message;
+        $('error').hidden = false;
+      } finally {
+        if (request === controller) request = null;
+        submit.disabled = false;
+      }
+    };
+
+    function lockDirectory() {
+      request?.abort();
+      members = [];
+      $('members').replaceChildren();
+      $('count').textContent = '';
+      $('search').value = '';
+      $('signup-type').value = '';
+      input.value = '';
+      $('directory').hidden = true;
+      $('lock').hidden = true;
+      form.hidden = false;
+    }
+    $('lock').onclick = () => { lockDirectory(); input.focus(); };
+    window.addEventListener('pagehide', lockDirectory);
+    $('search').oninput = render;
+    $('signup-type').onchange = render;
+
+    function csvCell(value) {
+      let text = String(value ?? '');
+      // Imported cells must stay literal even when a member types a formula.
+      if (typeof value === 'string' && /^\s*[=+@-]|^[\t\r\n]/.test(text)) text = "'" + text;
+      return '"' + text.replaceAll('"', '""') + '"';
+    }
+    $('export').onclick = () => {
+      const header = ['Name', 'Phone', 'Email', 'Points', 'Joined'];
+      const csv = [header, ...members.map(memberValues)].map(row => row.map(csvCell).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob(['\ufeff', csv, '\r\n'], {type: 'text/csv;charset=utf-8'}));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'steves-coffee-members.csv';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+  </script>
+</body>
+</html>

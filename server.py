@@ -39,6 +39,7 @@ CFG = {
     "cents_per_point": 500,
 }
 STAFF_PIN = os.environ.get("STAFF_PIN", "").strip()
+MEMBER_ADMIN_CODE = os.environ.get("MEMBER_ADMIN_CODE", "").strip()
 PILOT_CODE = os.environ.get("PILOT_CODE", "")
 ON_RENDER = os.environ.get("RENDER") == "true"
 PILOT_COOKIE = "steves_pilot"
@@ -502,6 +503,20 @@ def h_arrived(ctx, public_id):
         return serialize_order(get_order(con, public_id))
 
 
+def h_admin_members(ctx):
+    if len(MEMBER_ADMIN_CODE) < 24 or MEMBER_ADMIN_CODE in (STAFF_PIN, PILOT_CODE):
+        raise ApiError(503, "Set a separate MEMBER_ADMIN_CODE of at least 24 characters in Render.")
+    try:
+        code = unquote(ctx["headers"].get("X-Member-Admin-Code", ""), errors="strict").strip()
+    except UnicodeError:
+        raise ApiError(401, "Check your member admin code.") from None
+    if not hmac.compare_digest(code.encode(), MEMBER_ADMIN_CODE.encode()):
+        raise ApiError(401, "Check your member admin code.")
+    with db() as con:
+        rows = con.execute("SELECT name, phone, points, created FROM customers ORDER BY created DESC, phone").fetchall()
+    return {"members": [dict(public_customer(row), created=row["created"]) for row in rows]}
+
+
 def h_staff_member(ctx):
     require_staff(ctx["headers"])
     phone = account_identifier(ctx["body"])
@@ -602,6 +617,7 @@ ROUTES = [
     ("POST", r"/api/orders", h_create_order),
     ("GET", r"/api/orders/([A-Za-z0-9]+)", h_get_order),
     ("POST", r"/api/orders/([A-Za-z0-9]+)/arrived", h_arrived),
+    ("GET", r"/api/admin/members", h_admin_members),
     ("POST", r"/api/staff/loyalty/lookup", h_staff_member),
     ("POST", r"/api/staff/loyalty/credit", h_staff_credit),
     ("GET", r"/api/staff/orders", h_staff_orders),
@@ -681,8 +697,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(size)
 
     def serve_static(self, path):
-        path = {"/": "/index.html", "/staff": "/staff.html"}.get(path, path)
-        if path in ("/index.html", "/staff.html") and not self.pilot_access():
+        path = {"/": "/index.html", "/staff": "/staff.html", "/members": "/members.html"}.get(path, path)
+        if path in ("/index.html", "/staff.html", "/members.html") and not self.pilot_access():
             return self.send_file(STATIC / "pilot.html")
         file = (STATIC / path.lstrip("/")).resolve()
         if STATIC.resolve() not in file.parents or not file.is_file():
@@ -698,7 +714,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             if method == "GET":
                 return self.serve_static(path)
-            if method == "POST" and path in ("/", "/staff", "/index.html", "/staff.html"):
+            if method == "POST" and path in ("/", "/staff", "/members", "/index.html", "/staff.html", "/members.html"):
                 try:
                     return self.pilot_login(path)
                 except ApiError as e:
