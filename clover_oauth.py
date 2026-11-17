@@ -17,6 +17,7 @@ from http.cookies import SimpleCookie, CookieError
 AUTHORIZE = "https://sandbox.dev.clover.com/oauth/v2/authorize"
 API = "https://apisandbox.dev.clover.com"
 COOKIE = "clover_connect_state"
+FORM_COOKIE = "clover_connect_form"
 ID = re.compile(r"[A-Za-z0-9]{1,64}")
 TOKEN_LOCK = threading.Lock()
 
@@ -92,17 +93,17 @@ class CloverOAuth:
             self.save(merchant, pair)
             return pair["access_token"]
 
-    def cookie(self, handler):
+    def cookie(self, handler, name=COOKIE):
         cookies = SimpleCookie()
         try:
             cookies.load(handler.headers.get("Cookie", ""))
         except CookieError:
             return ""
-        return cookies[COOKIE].value if COOKIE in cookies else ""
+        return cookies[name].value if name in cookies else ""
 
-    def cookie_header(self, value="", age=600):
+    def cookie_header(self, value="", age=600, name=COOKIE):
         suffix = "; Secure" if self.secure else ""
-        return f"{COOKIE}={value}; Path=/clover; HttpOnly; SameSite=Lax; Max-Age={age}{suffix}"
+        return f"{name}={value}; Path=/clover; HttpOnly; SameSite=Lax; Max-Age={age}{suffix}"
 
     def page(self, handler, status, message, form=False, nonce=""):
         content = f'<p role="status">{html.escape(message)}</p>'
@@ -124,7 +125,8 @@ class CloverOAuth:
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
         handler.send_header("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'")
-        handler.send_header("Set-Cookie", self.cookie_header(nonce, 600 if nonce else 0))
+        if form:
+            handler.send_header("Set-Cookie", self.cookie_header(nonce, 600, FORM_COOKIE))
         handler.end_headers()
         handler.wfile.write(body)
 
@@ -136,10 +138,17 @@ class CloverOAuth:
         handler.send_header("Content-Length", "0")
         handler.end_headers()
 
+    def form_nonce(self, handler):
+        existing = self.cookie(handler, FORM_COOKIE)
+        if re.fullmatch(r"[A-Za-z0-9_-]{43}", existing):
+            return existing
+        return secrets.token_urlsafe(32)
+
     def handle(self, handler, method, path):
         if path == "/clover/connect" and method == "GET":
             return self.page(handler, 200,
-                "Enter the staff code to authorize a Clover test merchant.", True, secrets.token_urlsafe(32))
+                "Enter the staff code to authorize a Clover test merchant.", True,
+                self.form_nonce(handler))
         if path == "/clover/connect" and method == "POST":
             if handler.headers.get_content_type() != "application/x-www-form-urlencoded":
                 raise OAuthError("Use the Clover connection form.")
@@ -149,9 +158,11 @@ class CloverOAuth:
                 raise OAuthError("Invalid connection form.") from None
             nonce = body.get("nonce", [""])[0]
             code = body.get("code", [""])[0].strip()
-            cookie = self.cookie(handler)
+            cookie = self.cookie(handler, FORM_COOKIE)
             if not nonce or not cookie or not hmac.compare_digest(nonce.encode(), cookie.encode()):
-                raise OAuthError("Reload the connection page and try again.")
+                return self.page(handler, 400,
+                    "Your connection form expired. Enter your staff code again below. If this repeats, allow cookies for this site.",
+                    True, self.form_nonce(handler))
             if not self.staff_code or not hmac.compare_digest(code.encode(), self.staff_code.encode()):
                 return self.page(handler, 401, "Check your staff code and try again.", True, nonce)
             state = secrets.token_urlsafe(32)
