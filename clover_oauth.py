@@ -124,7 +124,7 @@ class CloverOAuth:
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'")
+        handler.send_header("Content-Security-Policy", "default-src 'self'; form-action 'self' https://sandbox.dev.clover.com; frame-ancestors 'none'")
         if form:
             handler.send_header("Set-Cookie", self.cookie_header(nonce, 600, FORM_COOKIE))
         handler.end_headers()
