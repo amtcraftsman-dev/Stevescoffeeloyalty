@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import clover
+from clover_loyalty import SandboxLoyalty
+from clover_oauth import CloverOAuth, OAuthError
 
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
@@ -59,6 +61,8 @@ ACTIVE = ("received", "preparing", "ready")
 STATUSES = ACTIVE + ("picked_up", "cancelled")
 LOCK = threading.Lock()
 CLOVER = clover.get_client()
+CLOVER_LOYALTY = None
+CLOVER_OAUTH = None
 FAILED_LOGINS = {}  # phone -> [timestamps]
 
 
@@ -96,6 +100,13 @@ def init_db():
         CREATE TABLE IF NOT EXISTS receipt_credits(
             receipt TEXT PRIMARY KEY, phone TEXT NOT NULL,
             subtotal_cents INTEGER NOT NULL, points INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS clover_loyalty_credits(
+            merchant TEXT NOT NULL, order_id TEXT NOT NULL, member TEXT, points INTEGER NOT NULL,
+            PRIMARY KEY (merchant, order_id));
+        CREATE TABLE IF NOT EXISTS clover_loyalty_events(
+            id INTEGER PRIMARY KEY, merchant TEXT NOT NULL, kind TEXT NOT NULL,
+            object_id TEXT NOT NULL, event_time INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+            retry_at INTEGER NOT NULL DEFAULT 0, UNIQUE (merchant, kind, object_id, event_time));
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
         """)
 
@@ -141,6 +152,13 @@ def account_identifier(body):
     if re.fullmatch(r"[+0-9(). -]{10,25}", value):
         return clean_phone(value)
     raise ApiError(400, "Enter a valid email address or 10-digit phone number.")
+
+
+def normalize_clover_contact(value):
+    try:
+        return account_identifier({"identifier": value})
+    except ApiError:
+        return None
 
 
 def hash_secret(secret, salt):
@@ -705,8 +723,55 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(404, {"error": "Not found."})
         return self.send_file(file)
 
+    def clover_webhook(self, path_token):
+        integration = CLOVER_LOYALTY
+        if not integration or not integration.matches_path(path_token):
+            return self.send_json(404, {"error": "Not found."})
+        if self.headers.get_content_type() != "application/json":
+            return self.send_json(415, {"error": "Expected JSON."})
+        try:
+            payload = json.loads(self.read_body())
+            if not isinstance(payload, dict):
+                raise ValueError
+            verification = payload.get("verificationCode")
+            if not integration.auth_code and isinstance(verification, str) and re.fullmatch(
+                r"[A-Za-z0-9-]{6,128}", verification
+            ):
+                print(f"[Clover sandbox setup] Verification code: {verification}")
+                return self.send_json(200, {"ok": True})
+            if not integration.authenticated(self.headers.get("X-Clover-Auth", ""), payload.get("appId")):
+                return self.send_json(401, {"error": "Invalid Clover authentication."})
+            integration.enqueue(db, payload)
+        except ApiError as error:
+            return self.send_json(error.status, {"error": error.msg})
+        except (ValueError, OverflowError):
+            return self.send_json(400, {"error": "Invalid Clover event."})
+        except sqlite3.Error:
+            return self.send_json(503, {"error": "Could not save the Clover event."})
+        return self.send_json(200, {"ok": True})
+
     def dispatch(self, method):
         path = urlparse(self.path).path
+        if path in ("/clover/connect", "/clover/callback", "/clover/connected"):
+            if CLOVER_OAUTH is None:
+                body = b"Set CLOVER_LOYALTY_APP_ID, CLOVER_OAUTH_APP_SECRET and CLOVER_OAUTH_BASE_URL in Render, then redeploy."
+                self.send_response(503)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            try:
+                return CLOVER_OAUTH.handle(self, method, path)
+            except ApiError as error:
+                return CLOVER_OAUTH.page(self, error.status, error.msg)
+            except OAuthError as error:
+                return CLOVER_OAUTH.page(self, 400, str(error))
+            except sqlite3.Error:
+                return CLOVER_OAUTH.page(self, 503, "Could not save the connection. Start again at /clover/connect.")
+        if method == "POST" and path.startswith("/api/clover/loyalty/"):
+            return self.clover_webhook(path.removeprefix("/api/clover/loyalty/"))
         if method == "GET" and path == "/health":
             with db() as con:
                 con.execute("SELECT 1 FROM settings LIMIT 1").fetchone()
@@ -767,7 +832,25 @@ if __name__ == "__main__":
             raise SystemExit(f"Set DB_PATH to a SQLite file under {db_root}.")
         if TEMPORARY_DB:
             print("Temporary pilot storage is enabled. Test data may reset when Render stops or redeploys.")
+    if os.environ.get("CLOVER_OAUTH_APP_SECRET"):
+        try:
+            CLOVER_OAUTH = CloverOAuth(db, STAFF_PIN, ON_RENDER)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+    if os.environ.get("CLOVER_LOYALTY_SANDBOX") == "1":
+        try:
+            CLOVER_LOYALTY = SandboxLoyalty(CLOVER_OAUTH)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
     init_db()
+    if CLOVER_OAUTH:
+        CLOVER_OAUTH.init_db()
+    if CLOVER_LOYALTY:
+        threading.Thread(
+            target=CLOVER_LOYALTY.run, daemon=True,
+            args=(db, normalize_clover_contact, add_points, CFG["cents_per_point"]),
+        ).start()
+        print("Clover loyalty sandbox enabled.")
     port = int(os.environ.get("PORT", "8000"))
     print(f"{CFG['shop_name']} running on http://localhost:{port}  (POS: {CLOVER.name})")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
