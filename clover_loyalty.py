@@ -136,12 +136,25 @@ class SandboxLoyalty:
         payments = elements(order, "payments")
         if not payments:
             raise CloverError("Paid order is missing payment detail.")
-        successful = [payment for payment in payments
+        # Expanded order payments may omit fields supplied by the payment endpoint.
+        complete_payments = []
+        for summary in payments:
+            if type(summary.get("taxAmount")) is not int:
+                payment_id = summary.get("id", "")
+                if not isinstance(payment_id, str) or not OBJECT_ID.fullmatch(payment_id):
+                    raise CloverError("Paid order is missing a valid payment identifier.")
+                detail = self.get(merchant, "payments", payment_id, "refunds")
+                if detail.get("id") != payment_id:
+                    raise CloverError("Clover returned a mismatched payment.")
+                summary = {**summary, **detail}
+            complete_payments.append(summary)
+        successful = [payment for payment in complete_payments
                       if payment.get("result") == "SUCCESS" and not payment.get("voided")]
         if not successful or any(elements(payment, "refunds") for payment in successful):
             raise CloverError("Paid order has no eligible payment or has a payment refund.")
         total = order.get("total")
-        taxes = [payment.get("taxAmount") for payment in successful]
+        taxes = [payment.get("taxAmount", 0 if order.get("taxRemoved") is True else None)
+                 for payment in successful]
         if type(total) is not int or total < 0 or any(type(tax) is not int or tax < 0 for tax in taxes):
             raise CloverError("Verify the total and tax on the Clover sandbox receipt.")
         points = max(0, total - sum(taxes)) // cents_per_point
