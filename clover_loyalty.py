@@ -166,8 +166,12 @@ class SandboxLoyalty:
         if not points:
             return
         customers = elements(order, "customers")
+        if not customers:
+            # Register can sync the payment before its newly attached customer.
+            # Keep this persisted event for bounded retries rather than losing points.
+            raise CloverError("Paid order customer has not synced yet.")
         if len(customers) != 1:
-            return
+            raise CloverError("Order has multiple customers and needs staff review.")
         customer_id = customers[0].get("id") or ""
         if not isinstance(customer_id, str) or not OBJECT_ID.fullmatch(customer_id):
             return
@@ -180,8 +184,10 @@ class SandboxLoyalty:
             matched = [identifier for identifier in candidates if conn.execute(
                 "SELECT 1 FROM customers WHERE phone=?", (identifier,)
             ).fetchone()]
+            if not matched:
+                raise CloverError("Paid order has no matching rewards account yet.")
             if len(matched) != 1:
-                return
+                raise CloverError("Customer matches multiple rewards accounts and needs staff review.")
             member = matched[0]
             result = conn.execute(
                 "INSERT OR IGNORE INTO clover_loyalty_credits VALUES (?,?,?,?)",
