@@ -143,10 +143,14 @@ class SandboxLoyalty:
                 payment_id = summary.get("id", "")
                 if not isinstance(payment_id, str) or not OBJECT_ID.fullmatch(payment_id):
                     raise CloverError("Paid order is missing a valid payment identifier.")
-                detail = self.get(merchant, "payments", payment_id, "refunds")
+                detail = self.get(merchant, "payments", payment_id, "refunds,taxRates")
                 if detail.get("id") != payment_id:
                     raise CloverError("Clover returned a mismatched payment.")
                 summary = {**summary, **detail}
+                # Clover omits zero tax for no-tax payments, including on the
+                # full payment endpoint. Expanded taxRates is absent/empty then.
+                if "taxAmount" not in detail and not elements(detail, "taxRates"):
+                    summary["taxAmount"] = 0
             complete_payments.append(summary)
         successful = [payment for payment in complete_payments
                       if payment.get("result") == "SUCCESS" and not payment.get("voided")]
